@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ollamaresearch"
+version = "1.0.0"
+description = "Framework de Deep Research con modelos Ollama y búsqueda web en vivo"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "OllamaResearch" }]
+keywords = ["ollama", "AI", "deep-research", "TUI", "terminal", "LLM", "research"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "textual>=0.50.0",
+    "ollama>=0.4.0",
+    "duckduckgo-search>=7.0.0",
+    "httpx>=0.27.0",
+    "beautifulsoup4>=4.12.0",
+    "rich>=13.7.0",
+    "click>=8.1.0",
+    "pyperclip>=1.8.2",
+    "lxml>=5.0.0",
+    "markdownify>=0.13.0",
+]
+
+[project.optional-dependencies]
+tavily = ["tavily-python>=0.3.0"]
+dev = ["pytest>=7.0", "pytest-asyncio>=0.23.0"]
+
+[project.scripts]
+ia = "ollamaresearch.cli:main"
+research = "ollamaresearch.cli:main"
+ollamaresearch = "ollamaresearch.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/ollamaresearch/ollamaresearch"
+Documentation = "https://github.com/ollamaresearch/ollamaresearch#readme"
+
+[tool.hatch.build.targets.wheel]
+packages = ["ollamaresearch"]

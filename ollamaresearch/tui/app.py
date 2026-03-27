@@ -247,16 +247,7 @@ class OllamaResearchApp(App):
         align: left middle;
     }
 
-    #model-indicator {
-        width: auto;
-        margin-right: 3;
-    }
-
-    #mode-indicator {
-        width: auto;
-        color: #9ece6a;
-        margin-right: 3;
-    }
+    #model-indicator { width: auto; margin-right: 3; }
 
     #status-bar {
         width: 1fr;
@@ -279,12 +270,7 @@ class OllamaResearchApp(App):
         margin: 0 1 0 0;
         height: 3;
     }
-
-    .mode-tab:hover {
-        color: #c0caf5;
-        background: #1f2235;
-    }
-
+    .mode-tab:hover { color: #c0caf5; background: #1f2235; }
     .active-tab {
         background: #1a1b2e;
         color: #7aa2f7;
@@ -292,9 +278,17 @@ class OllamaResearchApp(App):
         text-style: bold;
     }
 
-    #main-panel {
-        height: 1fr;
+    /* Barra de descripción del modo */
+    #mode-desc {
+        background: #0d0f1a;
+        color: #3b3f5a;
+        padding: 0 2;
+        height: auto;
+        min-height: 2;
+        border-bottom: solid #2a2d3e;
     }
+
+    #main-panel { height: 1fr; }
 
     #left-panel {
         width: 3fr;
@@ -315,34 +309,46 @@ class OllamaResearchApp(App):
         border-bottom: solid #2a2d3e;
     }
 
-    #chat-log {
+    /* Chat scroll area */
+    #chat-scroll {
         background: #0d0f1a;
-        padding: 1 2;
+        padding: 0 1;
         height: 1fr;
         scrollbar-color: #2a2d3e #0d0f1a;
     }
 
-    #sources-list {
-        height: 1fr;
-        background: #0d0f1a;
-    }
-
-    .source-title {
-        color: #c0caf5;
-        overflow: hidden;
-    }
-
-    .source-domain {
-        color: #7aa2f7;
-    }
-
-    .sources-empty-msg {
-        color: #3b3f5a;
-        text-align: center;
-        padding: 2;
+    /* Burbujas de mensajes */
+    UserBubble {
+        background: #1a1b2e;
+        border-left: thick #7aa2f7;
+        padding: 0 1;
+        margin: 1 0 0 0;
         height: auto;
     }
+    UserBubble .ub-label { color: #7aa2f7; text-style: bold; height: 1; }
+    UserBubble .ub-text  { color: #c0caf5; }
 
+    AIBubble {
+        background: #13141f;
+        border-left: thick #9ece6a;
+        padding: 0 1;
+        margin: 0 0 1 0;
+        height: auto;
+    }
+    AIBubble .ab-label { color: #9ece6a; text-style: bold; height: 1; }
+    AIBubble .ab-body  { color: #c0caf5; }
+
+    StatusLine {
+        color: #565f89;
+        height: auto;
+        padding: 0 2;
+    }
+
+    /* Fuentes */
+    #sources-list  { height: 1fr; background: #0d0f1a; }
+    #sources-empty { color: #3b3f5a; text-align: center; padding: 2; }
+    .src-title  { color: #c0caf5; }
+    .src-domain { color: #7aa2f7; }
     #sources-title {
         background: #1a1b2e;
         color: #565f89;

@@ -1,27 +1,15 @@
 """
-Pantalla principal de investigación — Vista de chat y research con streaming en vivo
+Pantalla principal — Chat con streaming correcto y descripciones de modos
 """
-import asyncio
 from datetime import datetime
 from typing import Dict, List, Optional
 
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Horizontal, ScrollableContainer, Vertical
+from textual.containers import Container, Horizontal, ScrollableContainer, Vertical, VerticalScroll
 from textual.screen import Screen
-from textual.widgets import (
-    Button,
-    Footer,
-    Header,
-    Input,
-    Label,
-    ListItem,
-    ListView,
-    Markdown,
-    RichLog,
-    Static,
-)
+from textual.widgets import Button, Footer, Header, Input, ListItem, ListView, Static
 
 from ollamaresearch.core.ollama_client import OllamaClient
 from ollamaresearch.core.research_agent import EventType, ResearchAgent, ResearchEvent
@@ -30,19 +18,134 @@ from ollamaresearch.core.web_scraper import WebScraper
 from ollamaresearch.utils.config import get_config
 
 
-class SourceItem(ListItem):
-    """Elemento de lista para una fuente web."""
+# ─── Descripciones de cada modo ──────────────────────────────────────────────
+MODE_INFO = {
+    "research": (
+        "🔬 Deep Research",
+        "Investiga en internet: genera sub-búsquedas → descarga páginas → sintetiza con IA "
+        "en múltiples iteraciones. Ideal para preguntas complejas o que necesitan información "
+        "actualizada. Más lento (1-3 min) pero muy completo.",
+    ),
+    "chat": (
+        "💬 Chat",
+        "Conversación directa con el modelo. NO busca en internet — usa solo el conocimiento "
+        "interno del modelo. Ideal para preguntas generales, redacción, código o brainstorming. "
+        "Rápido e inmediato.",
+    ),
+    "search": (
+        "🔍 Búsqueda Rápida",
+        "Busca en internet y el modelo resume los resultados en un párrafo. "
+        "Más rápido que Deep Research. Ideal para consultas simples que necesitan "
+        "datos recientes sin un informe exhaustivo.",
+    ),
+}
 
-    def __init__(self, source: SearchResult, index: int) -> None:
+
+# ─── Widgets de mensajes ─────────────────────────────────────────────────────
+
+class UserBubble(Widget):
+    """Burbuja de mensaje del usuario."""
+
+    DEFAULT_CSS = """
+    UserBubble {
+        background: #1a1b2e;
+        border-left: thick #7aa2f7;
+        padding: 0 1;
+        margin: 1 0 0 0;
+        height: auto;
+    }
+    UserBubble .ub-label { color: #7aa2f7; text-style: bold; height: 1; }
+    UserBubble .ub-text  { color: #c0caf5; }
+    """
+
+    def __init__(self, text: str):
+        super().__init__()
+        self._text = text
+
+    def compose(self) -> ComposeResult:
+        yield Static("▶ Tú", classes="ub-label")
+        yield Static(self._text, classes="ub-text")
+
+
+class StatusLine(Widget):
+    """Línea de estado durante el procesamiento."""
+
+    DEFAULT_CSS = """
+    StatusLine {
+        color: #565f89;
+        height: auto;
+        padding: 0 2;
+    }
+    """
+
+    def __init__(self, text: str):
+        super().__init__()
+        self._text = text
+
+    def compose(self) -> ComposeResult:
+        yield Static(self._text)
+
+    def set_text(self, text: str) -> None:
+        self._text = text
+        self.query_one(Static).update(text)
+
+
+class AIBubble(Widget):
+    """
+    Burbuja de respuesta IA con streaming en lugar.
+    El texto se actualiza con .append_text() sin crear nuevas líneas.
+    """
+
+    DEFAULT_CSS = """
+    AIBubble {
+        background: #13141f;
+        border-left: thick #9ece6a;
+        padding: 0 1;
+        margin: 0 0 1 0;
+        height: auto;
+    }
+    AIBubble .ab-label { color: #9ece6a; text-style: bold; height: 1; }
+    AIBubble .ab-body  { color: #c0caf5; }
+    """
+
+    def __init__(self, model: str):
+        super().__init__()
+        self._model = model
+        self._text = ""
+
+    def compose(self) -> ComposeResult:
+        yield Static(f"🤖 {self._model}", classes="ab-label")
+        yield Static("[dim]▋[/dim]", id="ab-body", classes="ab-body")
+
+    def append_text(self, text: str) -> None:
+        """Añade texto al streaming — actualiza en lugar, sin nuevas líneas."""
+        self._text += text
+        try:
+            self.query_one("#ab-body", Static).update(self._text + "[dim]▋[/dim]")
+        except Exception:
+            pass
+
+    def finish(self) -> None:
+        """Elimina el cursor parpadeante al terminar."""
+        try:
+            self.query_one("#ab-body", Static).update(self._text or "[dim](sin respuesta)[/dim]")
+        except Exception:
+            pass
+
+
+class SourceItem(ListItem):
+    """Elemento de fuente web."""
+
+    def __init__(self, source: SearchResult, index: int):
         super().__init__()
         self.source = source
         self.index = index
 
     def compose(self) -> ComposeResult:
-        domain = source_domain(self.source.url)
+        domain = _domain(self.source.url)
         yield Vertical(
-            Static(f"[bold]{self.index}.[/bold] {self.source.title[:50]}", classes="source-title"),
-            Static(f"[dim]{domain}[/dim]", classes="source-domain"),
+            Static(f"[bold]{self.index}.[/bold] {self.source.title[:45]}", classes="src-title"),
+            Static(f"[dim cyan]{domain}[/dim cyan]", classes="src-domain"),
         )
 
     def on_click(self) -> None:
@@ -50,8 +153,11 @@ class SourceItem(ListItem):
         webbrowser.open(self.source.url)
 
 
-def source_domain(url: str) -> str:
-    """Extrae el dominio de una URL."""
+# ─── Importación tardía que evita circular ────────────────────────────────────
+from textual.widget import Widget  # noqa: E402
+
+
+def _domain(url: str) -> str:
     try:
         from urllib.parse import urlparse
         return urlparse(url).netloc.replace("www.", "")
@@ -59,30 +165,23 @@ def source_domain(url: str) -> str:
         return url[:30]
 
 
+# ─── Pantalla principal ───────────────────────────────────────────────────────
+
 class ResearchView(Screen):
-    """
-    Pantalla principal de investigación.
-    Soporta tres modos: Deep Research, Chat, Búsqueda Rápida.
-    """
+    """Vista principal: Deep Research, Chat y Búsqueda Rápida."""
 
     BINDINGS = [
         Binding("ctrl+m", "change_model", "Cambiar Modelo"),
-        Binding("ctrl+n", "new_session", "Nueva Sesión"),
-        Binding("ctrl+s", "save_result", "Guardar"),
-        Binding("ctrl+c", "copy_result", "Copiar"),
-        Binding("ctrl+l", "clear_chat", "Limpiar"),
+        Binding("ctrl+n", "action_new_session", "Nueva Sesión"),
+        Binding("ctrl+s", "action_save_result", "Guardar"),
+        Binding("ctrl+c", "action_copy_result", "Copiar"),
+        Binding("ctrl+l", "action_clear_chat", "Limpiar"),
         Binding("escape", "change_model", "Cambiar Modelo"),
-        Binding("f1", "show_help", "Ayuda"),
+        Binding("f1", "action_show_help", "Ayuda"),
         Binding("ctrl+q", "app.quit", "Salir"),
     ]
 
-    def __init__(
-        self,
-        client: OllamaClient,
-        model: str,
-        mode: str = "research",
-        initial_query: str = "",
-    ):
+    def __init__(self, client: OllamaClient, model: str, mode: str = "research", initial_query: str = ""):
         super().__init__()
         self.client = client
         self.model = model
@@ -91,58 +190,54 @@ class ResearchView(Screen):
         self._is_processing = False
         self._sources: List[SearchResult] = []
         self._current_result = ""
-        self._messages: List[Dict] = []  # Historial de chat
+        self._messages: List[Dict] = []
         self._agent: Optional[ResearchAgent] = None
+        self._current_ai_bubble: Optional[AIBubble] = None
+        self._current_status: Optional[StatusLine] = None
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
-
         with Container(id="research-wrapper"):
-            # Barra superior con info del modelo y modo
+
+            # Barra superior
             with Horizontal(id="top-bar"):
                 yield Static(f"🤖 [bold cyan]{self.model}[/bold cyan]", id="model-indicator")
-                yield Static("", id="mode-indicator")
                 yield Static("", id="status-bar")
 
-            # Selector de modo
+            # Tabs de modo
             with Horizontal(id="mode-bar"):
                 yield Button("🔬 Deep Research", id="mode-research", classes="mode-tab")
-                yield Button("💬 Chat", id="mode-chat", classes="mode-tab")
-                yield Button("🔍 Búsqueda Rápida", id="mode-web", classes="mode-tab")
+                yield Button("💬 Chat",           id="mode-chat",     classes="mode-tab")
+                yield Button("🔍 Búsqueda Rápida", id="mode-web",    classes="mode-tab")
 
-            # Panel principal — split en dos columnas
+            # Descripción del modo activo
+            yield Static("", id="mode-desc")
+
+            # Panel principal
             with Horizontal(id="main-panel"):
-                # Panel izquierdo: conversación/resultados
+                # Conversación — VerticalScroll evita el bug de RichLog
                 with Vertical(id="left-panel"):
                     yield Static("💬 CONVERSACIÓN", classes="panel-header")
-                    yield RichLog(
-                        id="chat-log",
-                        highlight=True,
-                        markup=True,
-                        wrap=True,
-                    )
+                    yield VerticalScroll(id="chat-scroll")
 
-                # Panel derecho: fuentes
+                # Fuentes
                 with Vertical(id="right-panel"):
                     yield Static("🔗 FUENTES (0)", id="sources-title", classes="panel-header")
                     yield ListView(id="sources-list")
                     yield Static(
-                        "[dim]Las fuentes aparecerán\naquí durante la búsqueda[/dim]",
+                        "[dim]Las fuentes aparecerán\naquí al buscar[/dim]",
                         id="sources-empty",
-                        classes="sources-empty-msg",
+                        classes="src-empty",
                     )
 
-            # Panel de input
+            # Input
             with Container(id="input-area"):
-                yield Input(
-                    placeholder="Escribe tu pregunta aquí... (Enter para enviar)",
-                    id="query-input",
-                )
+                yield Input(placeholder="Escribe tu pregunta… (Enter para enviar)", id="query-input")
                 with Horizontal(id="input-actions"):
-                    yield Button("▶ Enviar", id="btn-send", variant="primary")
-                    yield Button("⏹ Detener", id="btn-stop", disabled=True)
+                    yield Button("▶ Enviar",  id="btn-send",  variant="primary")
+                    yield Button("⏹ Detener", id="btn-stop",  disabled=True)
                     yield Button("🔄 Limpiar", id="btn-clear")
-                    yield Button("📋 Copiar", id="btn-copy")
+                    yield Button("📋 Copiar",  id="btn-copy")
                     yield Button("💾 Guardar", id="btn-save")
 
         yield Footer()
@@ -150,93 +245,249 @@ class ResearchView(Screen):
     def on_mount(self) -> None:
         self._setup_mode()
         self._setup_agent()
-
-        # Mensaje de bienvenida
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(
-            f"\n[bold cyan]━━━ OllamaResearch ━━━[/bold cyan]\n"
-            f"[dim]Modelo:[/dim] [bold]{self.model}[/bold]\n"
-            f"[dim]Modo:[/dim] [bold]{self._mode_label()}[/bold]\n"
-            f"[dim]Atajos:[/dim] Ctrl+M cambiar modelo • Ctrl+N nueva sesión • Ctrl+L limpiar\n"
-            f"[cyan]━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/cyan]\n"
-        )
-
-        # Si se pasó una query inicial, ejecutarla
+        self._show_welcome()
         if self.initial_query:
-            query_input = self.query_one("#query-input", Input)
-            query_input.value = self.initial_query
+            self.query_one("#query-input", Input).value = self.initial_query
             self._execute_query(self.initial_query)
 
-    def _mode_label(self) -> str:
-        return {
-            "research": "🔬 Deep Research",
-            "chat": "💬 Chat",
-            "search": "🔍 Búsqueda Rápida",
-        }.get(self.mode, self.mode)
+    # ─── Setup ───────────────────────────────────────────────────────────────
 
     def _setup_mode(self) -> None:
-        """Configura la UI según el modo activo."""
-        mode_indicator = self.query_one("#mode-indicator", Static)
-        mode_indicator.update(self._mode_label())
-
-        # Actualizar botones de modo
+        name, desc = MODE_INFO.get(self.mode, ("", ""))
+        self.query_one("#mode-desc", Static).update(
+            f"[dim]  {desc}[/dim]"
+        )
+        for mid in ["mode-research", "mode-chat", "mode-web"]:
+            btn = self.query_one(f"#{mid}", Button)
+            btn.remove_class("active-tab")
         mode_map = {"research": "mode-research", "chat": "mode-chat", "search": "mode-web"}
-        for m, btn_id in mode_map.items():
-            btn = self.query_one(f"#{btn_id}", Button)
-            if m == self.mode:
-                btn.add_class("active-tab")
-            else:
-                btn.remove_class("active-tab")
+        if self.mode in mode_map:
+            self.query_one(f"#{mode_map[self.mode]}", Button).add_class("active-tab")
 
     def _setup_agent(self) -> None:
-        """Inicializa el agente de investigación."""
-        config = get_config()
-        search_engine = SearchEngine(
-            engine=config.search_engine,
-            tavily_key=config.tavily_api_key,
-            serper_key=config.serper_api_key,
+        cfg = get_config()
+        engine = SearchEngine(
+            engine=cfg.search_engine,
+            tavily_key=cfg.tavily_api_key,
+            serper_key=cfg.serper_api_key,
         )
-        scraper = WebScraper(timeout=10.0, max_chars=config.research_config.get("max_tokens_per_source", 2000))
+        scraper = WebScraper(
+            timeout=10.0,
+            max_chars=cfg.research_config.get("max_tokens_per_source", 2000),
+        )
         self._agent = ResearchAgent(
             ollama_client=self.client,
-            search_engine=search_engine,
+            search_engine=engine,
             scraper=scraper,
-            config=config.research_config,
+            config=cfg.research_config,
         )
 
+    def _show_welcome(self) -> None:
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        name, desc = MODE_INFO.get(self.mode, ("", ""))
+        # Se monta de forma síncrona en on_mount
+        scroll.mount(
+            StatusLine(
+                f"[cyan]━━━ OllamaResearch ━━━[/cyan]\n"
+                f"[dim]Modelo:[/dim] [bold]{self.model}[/bold]\n"
+                f"[dim]Modo:[/dim]   [bold]{name}[/bold]\n"
+                f"[dim]{desc}[/dim]\n"
+                f"[cyan]━━━━━━━━━━━━━━━━━━━━━━[/cyan]"
+            )
+        )
+
+    # ─── Envío de query ───────────────────────────────────────────────────────
+
     @on(Input.Submitted, "#query-input")
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        query = event.value.strip()
-        if query and not self._is_processing:
+    def on_submitted(self, event: Input.Submitted) -> None:
+        q = event.value.strip()
+        if q and not self._is_processing:
             event.input.value = ""
-            self._execute_query(query)
+            self._execute_query(q)
 
     @on(Button.Pressed, "#btn-send")
-    def on_send_pressed(self) -> None:
-        query_input = self.query_one("#query-input", Input)
-        query = query_input.value.strip()
-        if query and not self._is_processing:
-            query_input.value = ""
-            self._execute_query(query)
+    def on_send(self) -> None:
+        inp = self.query_one("#query-input", Input)
+        q = inp.value.strip()
+        if q and not self._is_processing:
+            inp.value = ""
+            self._execute_query(q)
 
     @on(Button.Pressed, "#btn-stop")
-    def on_stop_pressed(self) -> None:
-        # Textual workers se cancelan con worker.cancel()
-        for worker in self.app._workers:
-            if not worker.is_done:
-                worker.cancel()
+    def on_stop(self) -> None:
+        for w in self.app._workers:
+            if not w.is_done:
+                w.cancel()
         self._set_processing(False)
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write("\n[yellow]⚠️ Generación detenida por el usuario[/yellow]\n")
+        self._add_status("⚠️ [yellow]Generación detenida[/yellow]")
+
+    def _execute_query(self, query: str) -> None:
+        if self.mode == "research":
+            self._do_research(query)
+        elif self.mode == "chat":
+            self._do_chat(query)
+        else:
+            self._do_search(query)
+
+    # ─── Workers de IA ────────────────────────────────────────────────────────
+
+    @work(exclusive=False)
+    async def _do_research(self, query: str) -> None:
+        self._set_processing(True)
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        await scroll.mount(UserBubble(query))
+        self._current_ai_bubble = None
+        self._current_result = ""
+        await self._clear_sources()
+
+        async def handle(event: ResearchEvent) -> None:
+            if event.type in (EventType.STATUS, EventType.ITERATION,
+                              EventType.SEARCH_START, EventType.SCRAPING,
+                              EventType.SYNTHESIZING):
+                await self._update_status(event.text)
+
+            elif event.type == EventType.SOURCE_FOUND:
+                self._sources = event.sources
+                await self._update_sources(event.sources)
+
+            elif event.type == EventType.CHUNK:
+                if self._current_ai_bubble is None:
+                    self._current_ai_bubble = AIBubble(self.model)
+                    await scroll.mount(self._current_ai_bubble)
+                self._current_ai_bubble.append_text(event.text)
+                self._current_result += event.text
+                scroll.scroll_end(animate=False)
+
+            elif event.type == EventType.DONE:
+                if self._current_ai_bubble:
+                    self._current_ai_bubble.finish()
+                await self._update_status(event.text)
+
+        try:
+            result = await self._agent.research(query, self.model, handle)
+            self._messages.append({"role": "user", "content": query})
+            self._messages.append({"role": "assistant", "content": result.report})
+        except Exception as e:
+            await self._add_status_async(f"❌ [red]Error: {e}[/red]")
+        self._set_processing(False)
+
+    @work(exclusive=False)
+    async def _do_chat(self, query: str) -> None:
+        self._set_processing(True)
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        await scroll.mount(UserBubble(query))
+        self._current_ai_bubble = AIBubble(self.model)
+        await scroll.mount(self._current_ai_bubble)
+        self._current_result = ""
+        self._messages.append({"role": "user", "content": query})
+
+        async def handle(event: ResearchEvent) -> None:
+            if event.type == EventType.CHUNK:
+                self._current_ai_bubble.append_text(event.text)
+                self._current_result += event.text
+                scroll.scroll_end(animate=False)
+            elif event.type == EventType.DONE:
+                self._current_ai_bubble.finish()
+
+        try:
+            result = await self._agent.chat(self._messages, self.model, handle)
+            self._messages.append({"role": "assistant", "content": result})
+        except Exception as e:
+            await self._add_status_async(f"❌ [red]Error: {e}[/red]")
+        self._set_processing(False)
+
+    @work(exclusive=False)
+    async def _do_search(self, query: str) -> None:
+        self._set_processing(True)
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        await scroll.mount(UserBubble(query))
+        self._current_ai_bubble = AIBubble(self.model)
+        self._current_result = ""
+        await self._clear_sources()
+
+        async def handle(event: ResearchEvent) -> None:
+            if event.type == EventType.STATUS:
+                await self._update_status(event.text)
+            elif event.type == EventType.SOURCE_FOUND:
+                self._sources = event.sources
+                await self._update_sources(event.sources)
+                if self._current_ai_bubble not in scroll.children:
+                    await scroll.mount(self._current_ai_bubble)
+            elif event.type == EventType.CHUNK:
+                if self._current_ai_bubble not in scroll.children:
+                    await scroll.mount(self._current_ai_bubble)
+                self._current_ai_bubble.append_text(event.text)
+                self._current_result += event.text
+                scroll.scroll_end(animate=False)
+            elif event.type == EventType.DONE:
+                self._current_ai_bubble.finish()
+                await self._update_status(event.text)
+
+        try:
+            await self._agent.web_search_summary(query, self.model, handle)
+        except Exception as e:
+            await self._add_status_async(f"❌ [red]Error: {e}[/red]")
+        self._set_processing(False)
+
+    # ─── Helpers de UI ────────────────────────────────────────────────────────
+
+    def _set_processing(self, val: bool) -> None:
+        self._is_processing = val
+        self.query_one("#btn-send", Button).disabled = val
+        self.query_one("#btn-stop", Button).disabled = not val
+        self.query_one("#query-input", Input).disabled = val
+
+    def _add_status(self, text: str) -> None:
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        scroll.mount(StatusLine(text))
+
+    async def _add_status_async(self, text: str) -> None:
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        await scroll.mount(StatusLine(text))
+
+    async def _update_status(self, text: str) -> None:
+        if self._current_status is None:
+            self._current_status = StatusLine(text)
+            scroll = self.query_one("#chat-scroll", VerticalScroll)
+            await scroll.mount(self._current_status)
+        else:
+            self._current_status.set_text(text)
+
+    async def _clear_sources(self) -> None:
+        self._sources = []
+        src_list = self.query_one("#sources-list", ListView)
+        await src_list.clear()
+        self.query_one("#sources-title", Static).update("🔗 FUENTES (0)")
+        self.query_one("#sources-empty").display = True
+
+    async def _update_sources(self, sources: List[SearchResult]) -> None:
+        src_list = self.query_one("#sources-list", ListView)
+        await src_list.clear()
+        self.query_one("#sources-title", Static).update(f"🔗 FUENTES ({len(sources)})")
+        self.query_one("#sources-empty").display = False
+        for i, s in enumerate(sources[:20], 1):
+            await src_list.append(SourceItem(s, i))
+
+    def _show_status(self, msg: str) -> None:
+        sb = self.query_one("#status-bar", Static)
+        sb.update(msg)
+        self.set_timer(3.0, lambda: sb.update(""))
+
+    # ─── Botones de acción ────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#btn-clear")
     def action_clear_chat(self) -> None:
-        self.query_one("#chat-log", RichLog).clear()
+        scroll = self.query_one("#chat-scroll", VerticalScroll)
+        scroll.remove_children()
         self._messages = []
-        self._sources = []
         self._current_result = ""
-        sources_list = self.query_one("#sources-list", ListView)
-        sources_list.clear()
+        self._current_ai_bubble = None
+        self._current_status = None
+        self._show_welcome()
+        self._clear_sources_sync()
+
+    def _clear_sources_sync(self) -> None:
+        self._sources = []
         self.query_one("#sources-title", Static).update("🔗 FUENTES (0)")
         self.query_one("#sources-empty").display = True
 
@@ -250,230 +501,45 @@ class ResearchView(Screen):
             except Exception:
                 self._show_status("❌ Error al copiar")
         else:
-            self._show_status("⚠️ Nada que copiar")
+            self._show_status("⚠️ Nada que copiar aún")
 
     @on(Button.Pressed, "#btn-save")
     def action_save_result(self) -> None:
-        if self._current_result:
-            self._save_to_file()
-
-    def _save_to_file(self) -> None:
-        from ollamaresearch.utils.config import get_data_dir
-        import os
-        data_dir = get_data_dir() / "results"
-        data_dir.mkdir(exist_ok=True)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = data_dir / f"research_{timestamp}.md"
-        with open(filename, "w", encoding="utf-8") as f:
-            f.write(f"# Investigación: {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n")
-            f.write(self._current_result)
-        self._show_status(f"💾 Guardado en: {filename}")
-
-    def _show_status(self, message: str) -> None:
-        status = self.query_one("#status-bar", Static)
-        status.update(message)
-        self.set_timer(3.0, lambda: status.update(""))
-
-    def _set_processing(self, processing: bool) -> None:
-        self._is_processing = processing
-        send_btn = self.query_one("#btn-send", Button)
-        stop_btn = self.query_one("#btn-stop", Button)
-        query_input = self.query_one("#query-input", Input)
-
-        send_btn.disabled = processing
-        stop_btn.disabled = not processing
-        query_input.disabled = processing
-
-    def _execute_query(self, query: str) -> None:
-        """Despacha la query según el modo activo."""
-        if self.mode == "research":
-            self._do_research(query)
-        elif self.mode == "chat":
-            self._do_chat(query)
-        elif self.mode == "search":
-            self._do_search(query)
-
-    @work(exclusive=False)
-    async def _do_research(self, query: str) -> None:
-        """Ejecuta deep research en background."""
-        self._set_processing(True)
-        chat_log = self.query_one("#chat-log", RichLog)
-        self._current_result = ""
-
-        # Mostrar query del usuario
-        chat_log.write(
-            f"\n[bold cyan]┌─ Tú ───────────────────────────────[/bold cyan]\n"
-            f"[white]{query}[/white]\n"
-            f"[bold cyan]└────────────────────────────────────[/bold cyan]\n"
-        )
-
-        # Header de respuesta
-        chat_log.write(
-            f"\n[bold green]┌─ 🔬 OllamaResearch ({self.model}) ──────[/bold green]\n"
-        )
-
-        # Limpiar fuentes anteriores
-        sources_list = self.query_one("#sources-list", ListView)
-        sources_list.clear()
-        self._sources = []
-
-        async def handle_event(event: ResearchEvent):
-            if event.type == EventType.STATUS:
-                chat_log.write(f"[dim]{event.text}[/dim]\n")
-
-            elif event.type == EventType.ITERATION:
-                chat_log.write(
-                    f"\n[bold yellow]{'─' * 40}[/bold yellow]\n"
-                    f"[yellow]{event.text}[/yellow]\n"
-                )
-
-            elif event.type == EventType.SEARCH_START:
-                chat_log.write(f"[dim cyan]{event.text}[/dim cyan]\n")
-
-            elif event.type == EventType.SOURCE_FOUND:
-                self._sources = event.sources
-                self.query_one("#sources-title", Static).update(
-                    f"🔗 FUENTES ({len(event.sources)})"
-                )
-                sources_list.clear()
-                empty_msg = self.query_one("#sources-empty")
-                empty_msg.display = len(event.sources) == 0
-
-                for i, src in enumerate(event.sources[:20], 1):
-                    await sources_list.append(SourceItem(src, i))
-
-            elif event.type == EventType.SCRAPING:
-                chat_log.write(f"[dim]{event.text}[/dim]\n")
-
-            elif event.type == EventType.SYNTHESIZING:
-                chat_log.write(f"[dim magenta]{event.text}[/dim magenta]\n")
-                chat_log.write(
-                    "\n[bold green]┌─ 📝 Informe Final ─────────────────[/bold green]\n"
-                )
-
-            elif event.type == EventType.CHUNK:
-                chat_log.write(event.text)
-                self._current_result += event.text
-
-            elif event.type == EventType.DONE:
-                chat_log.write(
-                    f"\n[bold green]└─────────────────────────────────────[/bold green]\n"
-                    f"[dim]{event.text}[/dim]\n"
-                )
-
+        if not self._current_result:
+            self._show_status("⚠️ Nada que guardar")
+            return
         try:
-            result = await self._agent.research(query, self.model, handle_event)
-            # Guardar en historial de mensajes
-            self._messages.append({"role": "user", "content": query})
-            self._messages.append({"role": "assistant", "content": result.report})
-
+            from ollamaresearch.utils.config import get_data_dir
+            data_dir = get_data_dir() / "results"
+            data_dir.mkdir(exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            f = data_dir / f"research_{ts}.md"
+            f.write_text(
+                f"# Investigación — {datetime.now().strftime('%Y-%m-%d %H:%M')}\n\n"
+                + self._current_result,
+                encoding="utf-8",
+            )
+            self._show_status(f"💾 Guardado: {f.name}")
         except Exception as e:
-            chat_log.write(f"\n[bold red]❌ Error: {str(e)}[/bold red]\n")
+            self._show_status(f"❌ Error al guardar: {e}")
 
-        self._set_processing(False)
-
-    @work(exclusive=False)
-    async def _do_chat(self, query: str) -> None:
-        """Modo chat con streaming."""
-        self._set_processing(True)
-        chat_log = self.query_one("#chat-log", RichLog)
-        self._current_result = ""
-
-        chat_log.write(
-            f"\n[bold cyan]┌─ Tú ───────────────────────────────[/bold cyan]\n"
-            f"[white]{query}[/white]\n"
-            f"[bold cyan]└────────────────────────────────────[/bold cyan]\n"
-        )
-        chat_log.write(
-            f"\n[bold green]┌─ 🤖 {self.model} ─────────────────────[/bold green]\n"
-        )
-
-        self._messages.append({"role": "user", "content": query})
-
-        async def handle_event(event: ResearchEvent):
-            if event.type == EventType.CHUNK:
-                chat_log.write(event.text)
-                self._current_result += event.text
-            elif event.type == EventType.DONE:
-                chat_log.write(
-                    f"\n[bold green]└────────────────────────────────────[/bold green]\n"
-                )
-
-        try:
-            result = await self._agent.chat(self._messages, self.model, handle_event)
-            self._messages.append({"role": "assistant", "content": result})
-        except Exception as e:
-            chat_log.write(f"\n[bold red]❌ Error: {str(e)}[/bold red]\n")
-
-        self._set_processing(False)
-
-    @work(exclusive=False)
-    async def _do_search(self, query: str) -> None:
-        """Búsqueda web rápida con resumen."""
-        self._set_processing(True)
-        chat_log = self.query_one("#chat-log", RichLog)
-        self._current_result = ""
-
-        chat_log.write(
-            f"\n[bold cyan]┌─ Búsqueda ─────────────────────────[/bold cyan]\n"
-            f"[white]{query}[/white]\n"
-            f"[bold cyan]└────────────────────────────────────[/bold cyan]\n"
-        )
-        chat_log.write(
-            f"\n[bold green]┌─ 🔍 Resultados ────────────────────[/bold green]\n"
-        )
-
-        sources_list = self.query_one("#sources-list", ListView)
-        sources_list.clear()
-
-        async def handle_event(event: ResearchEvent):
-            if event.type == EventType.STATUS:
-                chat_log.write(f"[dim]{event.text}[/dim]\n")
-            elif event.type == EventType.SOURCE_FOUND:
-                self._sources = event.sources
-                self.query_one("#sources-title", Static).update(
-                    f"🔗 FUENTES ({len(event.sources)})"
-                )
-                for i, src in enumerate(event.sources[:20], 1):
-                    await sources_list.append(SourceItem(src, i))
-                self.query_one("#sources-empty").display = len(event.sources) == 0
-            elif event.type == EventType.CHUNK:
-                chat_log.write(event.text)
-                self._current_result += event.text
-            elif event.type == EventType.DONE:
-                chat_log.write(
-                    f"\n[bold green]└────────────────────────────────────[/bold green]\n"
-                    f"[dim]{event.text}[/dim]\n"
-                )
-
-        try:
-            await self._agent.web_search_summary(query, self.model, handle_event)
-        except Exception as e:
-            chat_log.write(f"\n[bold red]❌ Error: {str(e)}[/bold red]\n")
-
-        self._set_processing(False)
-
-    # ─── Cambio de modo ──────────────────────────────────────────────────────
+    # ─── Tabs de modo ─────────────────────────────────────────────────────────
 
     @on(Button.Pressed, "#mode-research")
-    def switch_research(self) -> None:
-        self.mode = "research"
-        self._setup_mode()
+    def sw_research(self) -> None:
+        self.mode = "research"; self._setup_mode()
 
     @on(Button.Pressed, "#mode-chat")
-    def switch_chat(self) -> None:
-        self.mode = "chat"
-        self._setup_mode()
+    def sw_chat(self) -> None:
+        self.mode = "chat"; self._setup_mode()
 
     @on(Button.Pressed, "#mode-web")
-    def switch_web(self) -> None:
-        self.mode = "search"
-        self._setup_mode()
+    def sw_web(self) -> None:
+        self.mode = "search"; self._setup_mode()
 
-    # ─── Acciones ────────────────────────────────────────────────────────────
+    # ─── Acciones ─────────────────────────────────────────────────────────────
 
     def action_change_model(self) -> None:
-        """Vuelve al selector de modelos."""
         from ollamaresearch.tui.screens.model_selector import ModelSelectorScreen
         self.app.push_screen(
             ModelSelectorScreen(self.client, self.model, self.mode),
@@ -482,36 +548,35 @@ class ResearchView(Screen):
 
     def _on_model_selected(self, result) -> None:
         if result:
-            model_name, mode = result
-            self.model = model_name
+            model, mode = result
+            self.model = model
             self.mode = mode
             self._setup_mode()
+            self._setup_agent()
             self.query_one("#model-indicator", Static).update(
-                f"🤖 [bold cyan]{self.model}[/bold cyan]"
+                f"🤖 [bold cyan]{model}[/bold cyan]"
             )
-            config = get_config()
-            config.last_model = model_name
-            config.last_mode = mode
+            cfg = get_config()
+            cfg.last_model = model
+            cfg.last_mode = mode
 
     def action_new_session(self) -> None:
         self.action_clear_chat()
 
     def action_show_help(self) -> None:
-        chat_log = self.query_one("#chat-log", RichLog)
-        chat_log.write(
-            "\n[bold yellow]━━━ AYUDA ━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]\n"
-            "[bold]Atajos de teclado:[/bold]\n"
-            "  [cyan]Enter[/cyan]       Enviar pregunta\n"
-            "  [cyan]Ctrl+M[/cyan]      Cambiar modelo\n"
-            "  [cyan]Ctrl+N[/cyan]      Nueva sesión\n"
-            "  [cyan]Ctrl+L[/cyan]      Limpiar pantalla\n"
-            "  [cyan]Ctrl+C[/cyan]      Copiar respuesta\n"
-            "  [cyan]Ctrl+S[/cyan]      Guardar respuesta\n"
-            "  [cyan]Ctrl+Q[/cyan]      Salir\n"
-            "  [cyan]F1[/cyan]          Esta ayuda\n"
-            "\n[bold]Modos:[/bold]\n"
-            "  [cyan]🔬 Deep Research[/cyan]  Investigación profunda con búsqueda web\n"
-            "  [cyan]💬 Chat[/cyan]           Conversación directa con el modelo\n"
-            "  [cyan]🔍 Búsqueda Rápida[/cyan] Búsqueda web con resumen del LLM\n"
-            "[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]\n"
+        self._add_status(
+            "[bold yellow]━━━ AYUDA ━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]\n"
+            "[bold]Atajos:[/bold]\n"
+            "  [cyan]Enter[/cyan]   Enviar pregunta\n"
+            "  [cyan]Ctrl+M[/cyan]  Cambiar modelo\n"
+            "  [cyan]Ctrl+N[/cyan]  Nueva sesión\n"
+            "  [cyan]Ctrl+L[/cyan]  Limpiar pantalla\n"
+            "  [cyan]Ctrl+C[/cyan]  Copiar respuesta\n"
+            "  [cyan]Ctrl+S[/cyan]  Guardar respuesta\n"
+            "  [cyan]Ctrl+Q[/cyan]  Salir\n"
+            "[bold]Modos:[/bold]\n"
+            "  [cyan]🔬 Deep Research[/cyan]   Búsqueda web + síntesis exhaustiva\n"
+            "  [cyan]💬 Chat[/cyan]            Conversación directa, sin internet\n"
+            "  [cyan]🔍 Búsqueda Rápida[/cyan] Busca + resume en segundos\n"
+            "[bold yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/bold yellow]"
         )

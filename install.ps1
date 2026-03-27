@@ -163,69 +163,91 @@ if (-not $ollamaFound -and -not $SkipOllama) {
 Write-Step "Paso 4/5: Instalando OllamaResearch"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$venvPath = Join-Path $scriptDir ".venv"
+$venvPython = Join-Path $venvPath "Scripts\python.exe"
 
-Write-Info "Instalando desde: $scriptDir"
+Write-Info "Directorio del proyecto: $scriptDir"
 
-# Intentar con pipx primero
-$pipxInstalled = $false
-try {
-    $null = & $pythonCmd -m pipx --version 2>&1
-    $pipxInstalled = $true
-} catch {}
-
-if (-not $pipxInstalled) {
-    Write-Info "Instalando pipx..."
-    & $pythonCmd -m pip install pipx --quiet
-    & $pythonCmd -m pipx ensurepath
-    $pipxInstalled = $true
+# Crear entorno virtual si no existe
+if (Test-Path $venvPython) {
+    Write-Info "Entorno virtual ya existe, reutilizando..."
+} else {
+    Write-Info "Creando entorno virtual (.venv)..."
+    & python -m venv $venvPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "No se pudo crear el entorno virtual."
+        Write-Host "  Intenta ejecutar como Administrador."
+        exit 1
+    }
+    Write-Success "Entorno virtual creado"
 }
 
-try {
-    Write-Info "Instalando OllamaResearch..."
-    & $pythonCmd -m pip install $scriptDir --quiet --user
-    Write-Success "OllamaResearch instalado correctamente"
-} catch {
-    Write-Fail "Error en la instalación: $_"
-    exit 1
-}
+# Actualizar pip dentro del venv
+Write-Info "Actualizando pip..."
+& $venvPython -m pip install --upgrade pip --quiet
 
-# ─── Paso 5: Configurar shortcuts ─────────────────────────────────────────────
-Write-Step "Paso 5/5: Configurando shortcuts de terminal"
+# Instalar el paquete
+Write-Info "Instalando paquete y dependencias (puede tardar 1-3 minutos)..."
+& $venvPython -m pip install $scriptDir --quiet
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Info "Reintentando con salida detallada..."
+    & $venvPython -m pip install $scriptDir
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "Error en la instalacion."
+        exit 1
+    }
+}
+Write-Success "OllamaResearch instalado correctamente"
+
+# ─── Paso 5: Crear lanzadores ────────────────────────────────────────────────
+Write-Step "Paso 5/5: Creando accesos directos y lanzadores"
+
+$venvPath = Join-Path $scriptDir ".venv"
+$venvPython = Join-Path $venvPath "Scripts\python.exe"
+
+# Crear ia.bat en la carpeta del proyecto
+$iaBatPath = Join-Path $scriptDir "ia.bat"
+$iaBatContent = "@echo off`r`ntitle OllamaResearch`r`n`"$venvPython`" -m ollamaresearch %*`r`n"
+Set-Content -Path $iaBatPath -Value $iaBatContent -Encoding ASCII
+Write-Success "Lanzador ia.bat creado: $iaBatPath"
 
 if (-not $NoShortcuts) {
-    # Configurar PowerShell Profile
+    # Acceso directo en el escritorio
+    try {
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut(
+            [Environment]::GetFolderPath('Desktop') + '\OllamaResearch (ia).lnk'
+        )
+        $shortcut.TargetPath = $iaBatPath
+        $shortcut.WorkingDirectory = $scriptDir
+        $shortcut.IconLocation = 'shell32.dll,137'
+        $shortcut.Description = 'OllamaResearch - Deep Research con IA'
+        $shortcut.Save()
+        Write-Success "Acceso directo creado en el Escritorio"
+    } catch {
+        Write-Warn "No se pudo crear el acceso directo: $_"
+    }
+
+    # Configurar PowerShell Profile para alias 'ia'
     if (-not (Test-Path $PROFILE)) {
         New-Item -Path $PROFILE -ItemType File -Force | Out-Null
     }
-    
-    $profileContent = Get-Content $PROFILE -ErrorAction SilentlyContinue
-    
-    $shortcutBlock = @"
+    $profileContent = Get-Content $PROFILE -ErrorAction SilentlyContinue -Raw
+    $shortcutBlock = "`r`n# OllamaResearch`r`nfunction ia { & '$iaBatPath' `$args }`r`nfunction research { & '$iaBatPath' `$args }`r`n"
 
-# OllamaResearch shortcuts — agregado por install.ps1
-function ia { python -m ollamaresearch @args }
-function research { python -m ollamaresearch @args }
-"@
-    
     if ($profileContent -notmatch "OllamaResearch") {
         Add-Content -Path $PROFILE -Value $shortcutBlock
-        Write-Success "Funciones 'ia' y 'research' añadidas al perfil de PowerShell"
+        Write-Success "Funcion 'ia' agregada al perfil de PowerShell"
     } else {
-        Write-Info "Shortcuts ya configurados en el perfil de PowerShell"
+        Write-Info "Funciones 'ia' ya configuradas en PowerShell"
     }
-    
-    # Agregar al PATH si es necesario
-    $userPath = [System.Environment]::GetEnvironmentVariable("PATH", "User")
-    $pythonScripts = "$env:APPDATA\Python\Python3*\Scripts"
-    $localPython = "$env:LOCALAPPDATA\Programs\Python\Python3*\Scripts"
-    
-    foreach ($path in @("$env:APPDATA\Python\Scripts", "$env:LOCALAPPDATA\Programs\Python\Python312\Scripts", "$env:LOCALAPPDATA\Programs\Python\Python311\Scripts")) {
-        if (Test-Path $path) {
-            if ($userPath -notlike "*$path*") {
-                [System.Environment]::SetEnvironmentVariable("PATH", "$userPath;$path", "User")
-                Write-Info "Añadido al PATH: $path"
-            }
-        }
+
+    # Agregar directorio al PATH para que 'ia' funcione en CMD
+    $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
+    if ($userPath -notlike "*$scriptDir*") {
+        [Environment]::SetEnvironmentVariable("PATH", "$userPath;$scriptDir", "User")
+        Write-Success "Directorio agregado al PATH: $scriptDir"
     }
 }
 

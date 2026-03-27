@@ -58,6 +58,21 @@ def _check_python_version():
     is_flag=True,
     help="Instalar shortcuts de terminal (ia, research)",
 )
+@click.option(
+    "--share",
+    is_flag=True,
+    help="Compartir tu terminal en vivo (instala tmate si es necesario)",
+)
+@click.option(
+    "--record",
+    is_flag=True,
+    help="Grabar la sesión de terminal con asciinema",
+)
+@click.option(
+    "--history",
+    is_flag=True,
+    help="Ver historial de sesiones guardadas (sin TUI)",
+)
 def main(
     query,
     model,
@@ -67,6 +82,9 @@ def main(
     config,
     list_models,
     install_shortcuts,
+    share,
+    record,
+    history,
 ):
     """
     \b
@@ -82,6 +100,9 @@ def main(
       ia --model llama3.2        → Usa un modelo específico
       ia --mode chat             → Modo chat simple
       ia --list-models           → Ver modelos instalados
+      ia --share                 → Compartir terminal en vivo (tmate)
+      ia --record                → Grabar sesión (asciinema)
+      ia --history               → Ver historial de sesiones
     """
     _check_python_version()
 
@@ -96,6 +117,18 @@ def main(
 
     if list_models:
         _list_models_cli(host)
+        return
+
+    if history:
+        _show_history_cli()
+        return
+
+    if share:
+        _share_terminal()
+        return
+
+    if record:
+        _record_session()
         return
 
     # Actualizar host en config si se especificó
@@ -260,5 +293,132 @@ def _install_windows_shortcuts():
         click.echo("  function ia { python -m ollamaresearch $args }")
 
 
+
+
+def _share_terminal():
+    """Comparte la terminal en vivo usando tmate."""
+    import platform
+    import shutil
+    import subprocess
+
+    click.echo("\n🔗 OllamaResearch — Compartir Terminal en Vivo\n")
+    click.echo("  tmate crea una sesión SSH que otra persona puede unirse")
+    click.echo("  para ver (o controlar) tu terminal en tiempo real.\n")
+
+    system = platform.system().lower()
+
+    if not shutil.which("tmate"):
+        click.echo("  ⟳ tmate no está instalado. Instalando...\n")
+        if system == "darwin":
+            subprocess.run(["brew", "install", "tmate"], check=False)
+        elif system == "linux":
+            # Intentar snap, apt, descarga directa
+            if shutil.which("snap"):
+                subprocess.run(["sudo", "snap", "install", "tmate"], check=False)
+            elif shutil.which("apt"):
+                subprocess.run(["sudo", "apt", "install", "-y", "tmate"], check=False)
+            else:
+                # Descarga binario directo
+                arch = "amd64" if platform.machine() == "x86_64" else "arm64v8"
+                url = f"https://github.com/tmate-io/tmate/releases/latest/download/tmate-linux-{arch}.tar.gz"
+                click.echo(f"  Descargando desde: {url}")
+                subprocess.run(f"curl -sL {url} | tar xz -C /usr/local/bin --strip-components=1 tmate*/tmate", shell=True)
+        elif system == "windows":
+            click.echo("  En Windows, instala WSL2 y ejecuta desde ahí, o usa SSH desde PowerShell.")
+            click.echo("  Descarga tmate: https://tmate.io")
+            return
+
+    if not shutil.which("tmate"):
+        click.echo("  ❌ No se pudo instalar tmate automáticamente.")
+        click.echo("  Instala manualmente desde: https://tmate.io")
+        return
+
+    click.echo("  ✅ tmate disponible\n")
+    click.echo("  Iniciando sesión compartida (Ctrl+C para terminar)...\n")
+    click.echo("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    click.echo("  Las URLs de conexión aparecerán abajo:")
+    click.echo("  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+
+    try:
+        # -F: modo que muestra el output directamente (no abre nueva ventana)
+        subprocess.run(["tmate", "-F"], check=False)
+    except KeyboardInterrupt:
+        pass
+    click.echo("\n  Sesión compartida terminada.")
+
+
+def _record_session():
+    """Graba la sesión de terminal con asciinema."""
+    import shutil
+    import subprocess
+    from datetime import datetime
+
+    click.echo("\n🎬 OllamaResearch — Grabar Sesión de Terminal\n")
+
+    if not shutil.which("asciinema"):
+        click.echo("  ⟳ asciinema no está instalado. Instalando...\n")
+        try:
+            subprocess.run([sys.executable, "-m", "pip", "install", "asciinema", "--quiet"])
+        except Exception:
+            pass
+
+    if not shutil.which("asciinema") and not subprocess.run(
+        [sys.executable, "-m", "asciinema", "--version"],
+        capture_output=True
+    ).returncode == 0:
+        click.echo("  ❌ No se pudo instalar asciinema.")
+        click.echo("  Instala con: pip install asciinema")
+        return
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    from ollamaresearch.utils.config import get_data_dir
+    out_dir = get_data_dir() / "recordings"
+    out_dir.mkdir(exist_ok=True)
+    out_file = out_dir / f"session_{ts}.cast"
+
+    click.echo(f"  📹 Grabando en: {out_file}")
+    click.echo("  Escribe 'exit' o Ctrl+D para terminar la grabación.\n")
+    click.echo("  Iniciando OllamaResearch grabado...\n")
+
+    asciinema_cmd = shutil.which("asciinema") or f"{sys.executable} -m asciinema"
+    cmd = f'{asciinema_cmd} rec --command "ia" --title "OllamaResearch {ts}" "{out_file}"'
+
+    try:
+        subprocess.run(cmd, shell=True)
+    except KeyboardInterrupt:
+        pass
+
+    if out_file.exists():
+        click.echo(f"\n  ✅ Grabación guardada: {out_file}")
+        click.echo(f"  Reproducir con: asciinema play \"{out_file}\"")
+        click.echo(f"  Subir y compartir: asciinema upload \"{out_file}\"")
+    else:
+        click.echo("\n  ⚠️ No se guardó la grabación.")
+
+
+def _show_history_cli():
+    """Muestra el historial de sesiones en la terminal (sin TUI)."""
+    from ollamaresearch.core.history import list_sessions
+
+    sessions = list_sessions(20)
+    click.echo("\n📚 OllamaResearch — Historial de Sesiones\n")
+
+    if not sessions:
+        click.echo("  (No hay sesiones guardadas todavía)")
+        click.echo("  Las sesiones se guardan automáticamente al usar Deep Research.\n")
+        return
+
+    for i, s in enumerate(sessions, 1):
+        ts = s["timestamp"][:16].replace("T", " ")
+        icon = {"research": "🔬", "chat": "💬", "search": "🔍"}.get(s["mode"], "•")
+        click.echo(f"  [{i:02d}] {ts}  {icon} {s['mode']:<10}  {s['query'][:50]}")
+
+    click.echo(f"\n  Total: {len(sessions)} sesiones")
+    click.echo(f"  Guardadas en: {sessions[0]['file'].parent}\n")
+    click.echo("  Usa 'ia --history' para ver el historial.")
+    click.echo("  Usa 'ia' → botón 📚 Historial para abrirlas en la interfaz.\n")
+
+
 if __name__ == "__main__":
     main()
+

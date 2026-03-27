@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ollamaresearch"
-version = "1.0.0"
+version = "1.1.0"
 description = "Framework de Deep Research con modelos Ollama y búsqueda web en vivo"
 readme = "README.md"
 license = { text = "MIT" }
@@ -37,7 +37,9 @@ dependencies = [
 
 [project.optional-dependencies]
 tavily = ["tavily-python>=0.3.0"]
+pdf = ["pdfplumber>=0.11.0"]
 dev = ["pytest>=7.0", "pytest-asyncio>=0.23.0"]
+all = ["tavily-python>=0.3.0", "pdfplumber>=0.11.0"]
 
 [project.scripts]
 ia = "ollamaresearch.cli:main"
@@ -45,8 +47,9 @@ research = "ollamaresearch.cli:main"
 ollamaresearch = "ollamaresearch.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/ollamaresearch/ollamaresearch"
-Documentation = "https://github.com/ollamaresearch/ollamaresearch#readme"
+Homepage = "https://github.com/alejandro-ai-dev/ollamaresearch"
+Documentation = "https://github.com/alejandro-ai-dev/ollamaresearch#readme"
+Repository = "https://github.com/alejandro-ai-dev/ollamaresearch"
 
 [tool.hatch.build.targets.wheel]
 packages = ["ollamaresearch"]

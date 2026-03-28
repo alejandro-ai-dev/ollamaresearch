@@ -95,6 +95,7 @@ class ModelSelectorScreen(Screen):
                 yield Button("🔬 Deep Research", id="btn-research", classes="mode-btn active-mode")
                 yield Button("💬 Chat", id="btn-chat", classes="mode-btn")
                 yield Button("🔍 Búsqueda Rápida", id="btn-search", classes="mode-btn")
+                yield Button("💻 Código", id="btn-code", classes="mode-btn")
 
             # Listas de modelos
             with Horizontal(id="model-columns"):
@@ -284,8 +285,16 @@ class ModelSelectorScreen(Screen):
         self._selected_mode = "search"
         self._update_mode_buttons("btn-search")
 
+    @on(Button.Pressed, "#btn-code")
+    def on_code_mode(self) -> None:
+        self._selected_mode = "code"
+        self._update_mode_buttons("btn-code")
+        self.query_one("#model-info", Static).update(
+            " 💡 Para modo Código se recomiendan: codellama, deepseek-r1:7b, qwen2.5:7b"
+        )
+
     def _update_mode_buttons(self, active_id: str) -> None:
-        for btn_id in ["btn-research", "btn-chat", "btn-search"]:
+        for btn_id in ["btn-research", "btn-chat", "btn-search", "btn-code"]:
             btn = self.query_one(f"#{btn_id}", Button)
             if btn_id == active_id:
                 btn.add_class("active-mode")

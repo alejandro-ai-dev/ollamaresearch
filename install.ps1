@@ -159,21 +159,22 @@ if (-not $ollamaFound -and -not $SkipOllama) {
     }
 }
 
-# ─── Paso 4: Instalar OllamaResearch ─────────────────────────────────────────
+# ─── Paso 4: Instalar OllamaResearch ─────────────────────────────────────────────
+
 Write-Step "Paso 4/5: Instalando OllamaResearch"
 
-$scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
-$venvPath = Join-Path $scriptDir ".venv"
+$scriptDir  = Split-Path -Parent $MyInvocation.MyCommand.Path
+$venvPath   = Join-Path $scriptDir ".venv"
 $venvPython = Join-Path $venvPath "Scripts\python.exe"
 
 Write-Info "Directorio del proyecto: $scriptDir"
 
 # Crear entorno virtual si no existe
 if (Test-Path $venvPython) {
-    Write-Info "Entorno virtual ya existe, reutilizando..."
+    Write-Info "Entorno virtual ya existe (.venv)"
 } else {
     Write-Info "Creando entorno virtual (.venv)..."
-    & python -m venv $venvPath
+    & $pythonCmd -m venv $venvPath
     if ($LASTEXITCODE -ne 0) {
         Write-Fail "No se pudo crear el entorno virtual."
         Write-Host "  Intenta ejecutar como Administrador."
@@ -182,23 +183,35 @@ if (Test-Path $venvPython) {
     Write-Success "Entorno virtual creado"
 }
 
+# Verificar que el venv tenga python.exe (por si el .venv estaba corrupto)
+if (-not (Test-Path $venvPython)) {
+    Write-Fail "El entorno virtual está corrupto. Eliminando y recreando..."
+    Remove-Item -Recurse -Force $venvPath -ErrorAction SilentlyContinue
+    & $pythonCmd -m venv $venvPath
+    if ($LASTEXITCODE -ne 0) {
+        Write-Fail "No se pudo recrear el entorno virtual."
+        exit 1
+    }
+    Write-Success "Entorno virtual recreado"
+}
+
 # Actualizar pip dentro del venv
 Write-Info "Actualizando pip..."
 & $venvPython -m pip install --upgrade pip --quiet
 
-# Instalar el paquete
+# Instalar/actualizar el paquete (--upgrade garantiza reinstalacion si ya existía)
 Write-Info "Instalando paquete y dependencias (puede tardar 1-3 minutos)..."
-& $venvPython -m pip install $scriptDir --quiet
+& $venvPython -m pip install --upgrade $scriptDir --quiet
 
 if ($LASTEXITCODE -ne 0) {
     Write-Info "Reintentando con salida detallada..."
-    & $venvPython -m pip install $scriptDir
+    & $venvPython -m pip install --upgrade $scriptDir
     if ($LASTEXITCODE -ne 0) {
-        Write-Fail "Error en la instalacion."
+        Write-Fail "Error en la instalacion. Prueba ejecutar como Administrador."
         exit 1
     }
 }
-Write-Success "OllamaResearch instalado correctamente"
+Write-Success "OllamaResearch instalado y actualizado correctamente"
 
 # ─── Paso 5: Crear lanzadores ────────────────────────────────────────────────
 Write-Step "Paso 5/5: Creando accesos directos y lanzadores"

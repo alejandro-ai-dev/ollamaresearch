@@ -527,18 +527,25 @@ class OllamaResearchApp(App):
         model_name, mode = result
         cfg = get_config()
         cfg.last_model = model_name
-        cfg.last_mode = mode
+        cfg.last_mode  = mode
 
-        from ollamaresearch.tui.screens.research_view import ResearchView
-
-        self.push_screen(
-            ResearchView(
+        if mode == "code":
+            from ollamaresearch.tui.screens.code_view import CodeView
+            self.push_screen(CodeView(
                 client=self._client,
                 model=model_name,
-                mode=mode,
                 initial_query=self.initial_query,
+            ))
+        else:
+            from ollamaresearch.tui.screens.research_view import ResearchView
+            self.push_screen(
+                ResearchView(
+                    client=self._client,
+                    model=model_name,
+                    mode=mode,
+                    initial_query=self.initial_query,
+                )
             )
-        )
 
     def action_change_model(self) -> None:
         """Shortcut global para volver al selector de modelos."""

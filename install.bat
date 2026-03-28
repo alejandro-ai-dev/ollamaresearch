@@ -1,182 +1,245 @@
 @echo off
-REM ═══════════════════════════════════════════════════════════════════════════════
-REM OllamaResearch — Instalador Windows (CMD Batch)
-REM Doble clic para ejecutar
-REM ═══════════════════════════════════════════════════════════════════════════════
+setlocal enabledelayedexpansion
+chcp 65001 >nul 2>&1
+title OllamaResearch — Instalador Windows (CMD)
 
-title OllamaResearch — Instalador
+:: ═══════════════════════════════════════════════════════════════════════════════
+:: OllamaResearch — Instalador para Windows (CMD / Símbolo del sistema)
+:: Uso: Doble clic en install.bat  -O-  desde CMD: install.bat
+:: Compatible con Windows 10 y Windows 11
+:: ═══════════════════════════════════════════════════════════════════════════════
 
-REM Obtener directorio del script SIN barra final (fix para pip en Windows)
-set "INSTALL_DIR=%~dp0"
-if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
-
-cls
-color 0B
 echo.
-echo   ============================================================
-echo     OllamaResearch -- Instalador para Windows
+echo   =============================================================
+echo     OllamaResearch — Instalador Windows (CMD)
 echo     Framework de Deep Research con IA en la Terminal
-echo   ============================================================
+echo   =============================================================
 echo.
-echo   Directorio de instalacion: %INSTALL_DIR%
+echo   Compatible con: Windows 10, Windows 11
 echo.
-echo   Presiona cualquier tecla para continuar...
-pause > nul
 
-REM ─── [1/5] Verificar Python ──────────────────────────────────────────────────
-echo.
-echo   [1/5] Verificando Python...
+:: Guardar directorio del script (siempre relativo al .bat)
+set "SCRIPT_DIR=%~dp0"
+:: Quitar barra final
+if "%SCRIPT_DIR:~-1%"=="\" set "SCRIPT_DIR=%SCRIPT_DIR:~0,-1%"
 
-set PYTHON_CMD=
-for %%p in (python py python3) do (
-    if not defined PYTHON_CMD (
-        %%p --version >nul 2>&1
-        if not errorlevel 1 (
-            set PYTHON_CMD=%%p
-        )
-    )
+set "VENV_DIR=%SCRIPT_DIR%\.venv"
+set "VENV_PYTHON=%VENV_DIR%\Scripts\python.exe"
+set "VENV_PIP=%VENV_DIR%\Scripts\pip.exe"
+
+:: ─── Paso 1: Buscar Python ─────────────────────────────────────────────────
+echo [1/5] Buscando Python 3.9+ ...
+echo.
+
+set "PYTHON_CMD="
+
+:: Intentar "python"
+python --version >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=2" %%v in ('python --version 2^>^&1') do set "PY_VER=%%v"
+    echo   [OK] python encontrado: !PY_VER!
+    set "PYTHON_CMD=python"
+    goto :python_found
 )
 
-if not defined PYTHON_CMD (
-    echo   ERROR: Python no encontrado.
-    echo.
-    echo   Instala Python desde: https://www.python.org/downloads
-    echo   IMPORTANTE: Marca "Add Python to PATH" durante la instalacion
-    echo.
-    start https://www.python.org/downloads/windows/
-    echo   Instala Python y vuelve a ejecutar este instalador.
-    pause
-    exit /b 1
+:: Intentar "python3"
+python3 --version >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=2" %%v in ('python3 --version 2^>^&1') do set "PY_VER=%%v"
+    echo   [OK] python3 encontrado: !PY_VER!
+    set "PYTHON_CMD=python3"
+    goto :python_found
 )
 
-for /f "tokens=2 delims= " %%v in ('%PYTHON_CMD% --version 2^>^&1') do set PYTHON_VER=%%v
-echo   OK: Python %PYTHON_VER% encontrado (%PYTHON_CMD%)
-
-REM ─── [2/5] Verificar entorno virtual ─────────────────────────────────────────
-echo.
-echo   [2/5] Creando entorno virtual en .venv ...
-
-if exist "%INSTALL_DIR%\.venv\Scripts\python.exe" (
-    echo   OK: Entorno virtual ya existe, usando el existente.
-) else (
-    %PYTHON_CMD% -m venv "%INSTALL_DIR%\.venv"
-    if errorlevel 1 (
-        echo   ERROR: No se pudo crear el entorno virtual.
-        echo   Intenta ejecutar este instalador como Administrador.
-        pause
-        exit /b 1
-    )
-    echo   OK: Entorno virtual creado.
+:: Intentar "py" (Python Launcher de Windows)
+py --version >nul 2>&1
+if %errorlevel% equ 0 (
+    for /f "tokens=2" %%v in ('py --version 2^>^&1') do set "PY_VER=%%v"
+    echo   [OK] py encontrado: !PY_VER!
+    set "PYTHON_CMD=py"
+    goto :python_found
 )
 
-set VENV_PYTHON="%INSTALL_DIR%\.venv\Scripts\python.exe"
-set VENV_PIP="%INSTALL_DIR%\.venv\Scripts\pip.exe"
-
-REM ─── [3/5] Verificar/Instalar Ollama ─────────────────────────────────────────
+echo   [ERROR] Python 3.9+ no encontrado en el PATH.
 echo.
-echo   [3/5] Verificando Ollama...
+echo   Opciones para instalar Python:
+echo     1. Microsoft Store: busca "Python 3.12"
+echo     2. Sitio oficial:   https://python.org/downloads
+echo     3. Winget:          winget install Python.Python.3.12
+echo.
+echo   IMPORTANTE: Al instalar, marca la opcion "Add Python to PATH"
+echo.
+set /p "OPEN_BROWSER=   Abrir pagina de descarga de Python? (S/N): "
+if /i "%OPEN_BROWSER%"=="S" start https://www.python.org/downloads/windows/
+echo.
+echo   Instala Python, cierra esta ventana y vuelve a ejecutar install.bat
+pause
+exit /b 1
 
+:python_found
+
+:: ─── Paso 2: Verificar pip ─────────────────────────────────────────────────
+echo.
+echo [2/5] Verificando pip ...
+%PYTHON_CMD% -m pip --version >nul 2>&1
+if %errorlevel% neq 0 (
+    echo   pip no encontrado. Instalando...
+    %PYTHON_CMD% -m ensurepip --upgrade
+)
+echo   [OK] pip disponible
+
+:: ─── Paso 3: Verificar Ollama ───────────────────────────────────────────────
+echo.
+echo [3/5] Verificando Ollama ...
 ollama --version >nul 2>&1
-if not errorlevel 1 (
-    for /f "tokens=*" %%v in ('ollama --version 2^>^&1') do echo   OK: Ollama instalado: %%v
-    goto instalar_paquete
-)
-
-echo   Ollama no encontrado. Descargando instalador...
-powershell -Command "try { Invoke-WebRequest -Uri 'https://ollama.com/download/OllamaSetup.exe' -OutFile '%TEMP%\OllamaSetup.exe' -UseBasicParsing; Write-Host 'OK' } catch { Write-Host 'ERROR' }"
-
-if exist "%TEMP%\OllamaSetup.exe" (
-    echo   Ejecutando instalador de Ollama (proceso silencioso)...
-    start /wait "%TEMP%\OllamaSetup.exe" /S
-    del "%TEMP%\OllamaSetup.exe" 2>nul
-    echo   Ollama instalado. Puede requerir reiniciar la terminal.
+if %errorlevel% equ 0 (
+    for /f "tokens=*" %%v in ('ollama --version 2^>^&1') do set "OLLAMA_VER=%%v"
+    echo   [OK] Ollama instalado: !OLLAMA_VER!
+    set "OLLAMA_OK=1"
 ) else (
-    echo   No se pudo descargar Ollama automaticamente.
-    echo   Descarga manualmente: https://ollama.com/download/windows
-    start https://ollama.com/download/windows
-    echo   Continua la instalacion sin Ollama (instala Ollama despues).
+    echo   [AVISO] Ollama no encontrado.
+    echo   Descargalo desde: https://ollama.com/download/windows
+    set "OLLAMA_OK=0"
+    echo.
+    set /p "OPEN_OLLAMA=   Abrir pagina de descarga de Ollama? (S/N): "
+    if /i "!OPEN_OLLAMA!"=="S" start https://ollama.com/download/windows
 )
 
-:instalar_paquete
-REM ─── [4/5] Instalar OllamaResearch en el venv ────────────────────────────────
+:: ─── Paso 4: Crear venv e instalar OllamaResearch ───────────────────────────
 echo.
-echo   [4/5] Instalando OllamaResearch...
-echo   (Esto puede tardar 1-3 minutos descargando dependencias)
+echo [4/5] Instalando OllamaResearch ...
+echo   Directorio: %SCRIPT_DIR%
 echo.
 
-REM Actualizar pip primero dentro del venv
-%VENV_PYTHON% -m pip install --upgrade pip --quiet
-
-REM Instalar el paquete desde el directorio actual
-%VENV_PYTHON% -m pip install "%INSTALL_DIR%" --quiet
-
-if errorlevel 1 (
-    echo.
-    echo   ERROR en instalacion silenciosa. Intentando con salida detallada...
-    %VENV_PYTHON% -m pip install "%INSTALL_DIR%"
-    if errorlevel 1 (
+:: Verificar si el venv existe y es valido
+if exist "%VENV_PYTHON%" (
+    echo   Entorno virtual encontrado (.venv)
+) else (
+    :: Si el directorio existe pero python.exe no, borrarlo y recrear
+    if exist "%VENV_DIR%" (
+        echo   Entorno virtual corrupto. Recreando...
+        rmdir /s /q "%VENV_DIR%"
+    ) else (
+        echo   Creando entorno virtual (.venv)...
+    )
+    %PYTHON_CMD% -m venv "%VENV_DIR%"
+    if %errorlevel% neq 0 (
         echo.
-        echo   ERROR: No se pudo instalar OllamaResearch.
-        echo   Por favor reporta este error en:
-        echo   https://github.com/alejandro-ai-dev/ollamaresearch/issues
+        echo   [ERROR] No se pudo crear el entorno virtual.
+        echo   Intenta ejecutar install.bat como Administrador.
+        pause
+        exit /b 1
+    )
+    echo   [OK] Entorno virtual creado
+)
+
+:: Actualizar pip dentro del venv
+echo.
+echo   Actualizando pip...
+"%VENV_PYTHON%" -m pip install --upgrade pip --quiet
+echo   [OK] pip actualizado
+
+:: Instalar/actualizar el paquete (--upgrade fuerza reinstalacion si ya existe)
+echo.
+echo   Instalando dependencias (puede tardar 2-4 minutos la primera vez)...
+echo   Por favor espera...
+echo.
+"%VENV_PYTHON%" -m pip install --upgrade "%SCRIPT_DIR%" --quiet
+
+if %errorlevel% neq 0 (
+    echo.
+    echo   Reintentando con salida detallada...
+    echo.
+    "%VENV_PYTHON%" -m pip install --upgrade "%SCRIPT_DIR%"
+    if %errorlevel% neq 0 (
+        echo.
+        echo   [ERROR] No se pudo instalar OllamaResearch.
+        echo   Intenta ejecutar install.bat como Administrador.
         pause
         exit /b 1
     )
 )
 
-echo   OK: OllamaResearch instalado correctamente.
+echo   [OK] OllamaResearch instalado y actualizado
 
-REM ─── [5/5] Crear lanzadores ──────────────────────────────────────────────────
+:: ─── Paso 5: Crear lanzadores ───────────────────────────────────────────────
 echo.
-echo   [5/5] Creando accesos directos...
+echo [5/5] Creando lanzadores ...
 
-REM Crear script lanzador ia.bat en la carpeta del proyecto
-echo @echo off > "%INSTALL_DIR%\ia.bat"
-echo title OllamaResearch >> "%INSTALL_DIR%\ia.bat"
-echo "%INSTALL_DIR%\.venv\Scripts\python.exe" -m ollamaresearch %%* >> "%INSTALL_DIR%\ia.bat"
+:: Crear ia.bat en la carpeta del proyecto
+set "IA_BAT=%SCRIPT_DIR%\ia.bat"
+(
+    echo @echo off
+    echo title OllamaResearch
+    echo "%VENV_PYTHON%" -m ollamaresearch %%*
+) > "%IA_BAT%"
+echo   [OK] Lanzador creado: ia.bat
 
-REM Crear acceso directo en el escritorio
-powershell -Command ^
-    "$shell = New-Object -ComObject WScript.Shell; ^
-     $shortcut = $shell.CreateShortcut([Environment]::GetFolderPath('Desktop') + '\OllamaResearch (ia).lnk'); ^
-     $shortcut.TargetPath = '%INSTALL_DIR%\ia.bat'; ^
-     $shortcut.WorkingDirectory = '%INSTALL_DIR%'; ^
-     $shortcut.IconLocation = 'shell32.dll,137'; ^
-     $shortcut.Description = 'OllamaResearch - Deep Research con IA'; ^
-     $shortcut.Save()"
+:: Crear acceso directo en el Escritorio usando VBScript
+set "DESKTOP=%USERPROFILE%\Desktop"
+set "SHORTCUT_VBS=%TEMP%\create_shortcut.vbs"
 
-if not errorlevel 1 (
-    echo   OK: Acceso directo creado en el Escritorio
+(
+    echo Set oWS = WScript.CreateObject("WScript.Shell"^)
+    echo sLinkFile = "%DESKTOP%\OllamaResearch (ia).lnk"
+    echo Set oLink = oWS.CreateShortcut(sLinkFile^)
+    echo oLink.TargetPath = "%IA_BAT%"
+    echo oLink.WorkingDirectory = "%SCRIPT_DIR%"
+    echo oLink.Description = "OllamaResearch - Deep Research con IA"
+    echo oLink.IconLocation = "shell32.dll,137"
+    echo oLink.Save
+) > "%SHORTCUT_VBS%"
+
+cscript //nologo "%SHORTCUT_VBS%" >nul 2>&1
+if %errorlevel% equ 0 (
+    echo   [OK] Acceso directo creado en el Escritorio
 ) else (
-    echo   ADVERTENCIA: No se pudo crear el acceso directo
+    echo   [AVISO] No se pudo crear el acceso directo (no critico)
+)
+del "%SHORTCUT_VBS%" >nul 2>&1
+
+:: Agregar directorio al PATH del usuario (permanente)
+echo   Agregando directorio al PATH...
+for /f "skip=2 tokens=3*" %%a in ('reg query "HKCU\Environment" /v PATH 2^>nul') do set "USER_PATH=%%a %%b"
+echo !USER_PATH! | findstr /i "%SCRIPT_DIR%" >nul 2>&1
+if %errorlevel% neq 0 (
+    setx PATH "%SCRIPT_DIR%;!USER_PATH!" >nul 2>&1
+    echo   [OK] Directorio agregado al PATH
+) else (
+    echo   [OK] Ya estaba en el PATH
 )
 
-REM Intentar agregar carpeta al PATH del usuario
-powershell -Command "[Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'User') + ';%INSTALL_DIR%', 'User')" 2>nul
-echo   OK: Carpeta agregada al PATH del usuario
+:: ─── Resumen final ──────────────────────────────────────────────────────────
+echo.
+echo   =============================================================
+echo     Instalacion completada exitosamente!
+echo   =============================================================
+echo.
+echo   Para usar OllamaResearch:
+echo.
+echo   1. Cierra y vuelve a abrir CMD o PowerShell
+echo.
+echo   2. Escribe "ia" y presiona Enter:
+echo      C:\> ia
+echo      C:\> ia "que es la inteligencia artificial?"
+echo.
+echo   3. O haz doble clic en el acceso directo del Escritorio
+echo.
 
-REM ─── Resumen ─────────────────────────────────────────────────────────────────
+if "%OLLAMA_OK%"=="0" (
+    echo   AVISO: Recuerda instalar Ollama primero:
+    echo     https://ollama.com/download/windows
+    echo.
+)
+
+echo   4. Si no tienes modelos descargados aun, abre una terminal y escribe:
+echo      ollama pull llama3.2
 echo.
-echo   ============================================================
-echo     INSTALACION COMPLETADA EXITOSAMENTE
-echo   ============================================================
-echo.
-echo   COMO USAR OllamaResearch:
-echo.
-echo   Opcion 1: Doble clic en "OllamaResearch (ia)" en el Escritorio
-echo.
-echo   Opcion 2: Abre CMD o PowerShell y escribe:
-echo     ia
-echo.
-echo     (Si 'ia' no funciona, cierra y abre una nueva ventana de CMD)
-echo.
-echo   Opcion 3: Ruta completa:
-echo     "%INSTALL_DIR%\ia.bat"
-echo.
-echo   Para descargar un modelo de IA (en CMD):
-echo     ollama pull llama3.2
-echo.
-echo   NOTA: Si es la primera vez, descarga un modelo antes de usar ia.
+echo   Atajos disponibles:
+echo     ia                   Abre la interfaz completa
+echo     ia "pregunta"        Investiga directamente
+echo     research             Alias alternativo
 echo.
 
 pause
+endlocal

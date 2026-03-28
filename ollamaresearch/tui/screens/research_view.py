@@ -43,6 +43,11 @@ MODE_INFO = {
         "Busca en internet y resume en segundos. "
         "Punto medio entre Deep Research y Chat.",
     ),
+    "code": (
+        "💻 Modo Código",
+        "Agente de terminal: crea proyectos, escribe código, gestiona entornos virtuales. "
+        "Ideal para frameworks de pentesting y desarrollo asistido por IA.",
+    ),
 }
 
 
@@ -238,6 +243,7 @@ class ResearchView(Screen):
                 yield Button("🔬 Deep Research",  id="mode-research", classes="mode-tab")
                 yield Button("💬 Chat",            id="mode-chat",    classes="mode-tab")
                 yield Button("🔍 Búsqueda Rápida", id="mode-web",     classes="mode-tab")
+                yield Button("💻 Código",           id="mode-code",    classes="mode-tab")
                 yield Button("📚 Historial",        id="btn-history",  classes="mode-tab hist-btn")
 
             yield Static("", id="mode-desc")
@@ -284,11 +290,14 @@ class ResearchView(Screen):
     def _setup_mode(self) -> None:
         name, desc = MODE_INFO.get(self.mode, ("", ""))
         self.query_one("#mode-desc", Static).update(f"[dim]  {desc}[/dim]")
-        for mid in ["mode-research", "mode-chat", "mode-web"]:
+        for mid in ["mode-research", "mode-chat", "mode-web", "mode-code"]:
             self.query_one(f"#{mid}", Button).remove_class("active-tab")
-        mode_map = {"research": "mode-research", "chat": "mode-chat", "search": "mode-web"}
+        mode_map = {"research": "mode-research", "chat": "mode-chat", "search": "mode-web", "code": "mode-code"}
         if self.mode in mode_map:
             self.query_one(f"#{mode_map[self.mode]}", Button).add_class("active-tab")
+        # Si cambia a modo código, navegar a CodeView
+        if self.mode == "code":
+            self.app.call_later(self._go_to_code_view)
 
     def _setup_agent(self) -> None:
         cfg = get_config()
@@ -366,6 +375,8 @@ class ResearchView(Screen):
                 self._do_research(query)
             elif self.mode == "chat":
                 self._do_chat(query)
+            elif self.mode == "code":
+                self._go_to_code_view(query)
             else:
                 self._do_search(query)
 
@@ -686,6 +697,18 @@ class ResearchView(Screen):
     @on(Button.Pressed, "#mode-web")
     def sw_web(self) -> None:
         self.mode = "search"; self._setup_mode()
+
+    @on(Button.Pressed, "#mode-code")
+    def sw_code(self) -> None:
+        self.mode = "code"; self._setup_mode()
+
+    def _go_to_code_view(self, initial_query: str = "") -> None:
+        from ollamaresearch.tui.screens.code_view import CodeView
+        self.app.push_screen(CodeView(
+            client=self.client,
+            model=self.model,
+            initial_query=initial_query,
+        ))
 
     # ─── Búsqueda Ctrl+F ─────────────────────────────────────────────────────
 

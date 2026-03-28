@@ -46,64 +46,116 @@ class ResearchResult:
 
 # ─── Prompts del sistema ──────────────────────────────────────────────────────
 
-QUERY_GENERATION_PROMPT = """Eres un experto en investigación. El usuario quiere investigar:
+QUERY_GENERATION_PROMPT = """\
+ROL: Especialista en búsqueda de información. Tu ÚNICA tarea es generar consultas de búsqueda web.
 
-"{query}"
+OBJETIVO DE INVESTIGACIÓN: {query}
 
 {context}
 
-Genera exactamente {num_queries} consultas de búsqueda específicas y complementarias para encontrar información exhaustiva sobre este tema. Las consultas deben ser en español e inglés alternativamente para maximizar resultados.
+REGLAS ESTRICTAS:
+- Genera EXACTAMENTE {num_queries} consultas de búsqueda
+- Cada consulta debe atacar un ángulo DIFERENTE del tema (definición, aplicaciones, comparativas, últimos avances, casos reales)
+- Alterna entre español e inglés para maximizar cobertura de fuentes
+- Las consultas deben ser directas, como si las escribieras en un buscador (sin signos de pregunta, sin verbos como "investigar" o "buscar")
+- NO corrijas ni interpretes errores en el objetivo — úsalo tal como está
+- NO expliques nada, NO numeres, NO pongas viñetas
 
-RESPONDE SOLO con las consultas, una por línea, sin numeración ni explicaciones."""
+FORMATO DE SALIDA — solo las consultas, una por línea:"""
 
-GAP_ANALYSIS_PROMPT = """Estás analizando si la investigación sobre "{query}" está completa.
+GAP_ANALYSIS_PROMPT = """\
+ROL: Evaluador de completitud en investigación.
 
-Información recopilada hasta ahora:
+OBJETIVO ORIGINAL: {query}
+
+INFORMACIÓN RECOPILADA:
 {knowledge}
 
-¿La información anterior responde completamente a la pregunta original? 
-Si NO está completa, lista en máximo 3 bullets los aspectos que faltan.
-Si SÍ está completa, responde exactamente: COMPLETO
+EVALÚA si la información recopilada responde de forma SUFICIENTE el objetivo original.
 
-Sé muy conciso."""
+CRITERIOS para considerar COMPLETO:
+- Se responde la pregunta central con datos concretos
+- Hay al menos un ejemplo, caso o evidencia
+- Hay una conclusión o síntesis aplicable
 
-SYNTHESIS_PROMPT = """Eres un investigador experto. Tu tarea es sintetizar la siguiente información recopilada de múltiples fuentes web sobre:
+Si está COMPLETO → responde únicamente la palabra: COMPLETO
+Si NO está completo → lista máximo 3 aspectos clave que faltan, en formato bullet, sin explicaciones adicionales.
+NO hagas preguntas. NO corrijas el objetivo. Sé brutalmente conciso."""
 
-**Pregunta:** {query}
+SYNTHESIS_PROMPT = """\
+ROL: Analista de información. Tu tarea es construir conocimiento útil a partir de fuentes web.
 
-**Fuentes y contenido:**
+OBJETIVO DE INVESTIGACIÓN: {query}
+
+FUENTES RECOPILADAS:
 {sources_content}
 
 {previous_knowledge}
 
-Sintetiza la información en un análisis coherente. Sé preciso, cita hechos concretos cuando estén disponibles. No inventes información. Si hay contradicciones entre fuentes, menciónalo."""
+INSTRUCCIONES:
+1. Extrae los hechos, datos y conclusiones MÁS RELEVANTES para el objetivo
+2. Descarta información que no aporte al objetivo (publicidad, navegación del sitio, contenido genérico)
+3. Si dos fuentes se contradicen, menciona ambas perspectivas brevemente
+4. NO inventes datos. Si la información es insuficiente, dilo en una línea
+5. NO corrijas el objetivo original. Trabaja con él tal como fue dado
+6. Mantén el foco: cada párrafo debe relacionarse directamente con el objetivo
 
-FINAL_REPORT_PROMPT = """Eres un investigador experto. Basándote en toda la investigación realizada, escribe un informe completo y bien estructurado sobre:
+SINTESIS (clara, estructurada, orientada al objetivo):"""
 
-**Pregunta original:** {query}
+FINAL_REPORT_PROMPT = """\
+ROL: Redactor de informes de investigación. Crea el informe definitivo basado en la investigación realizada.
 
-**Conocimiento acumulado:**
+OBJETIVO ORIGINAL: {query}
+
+CONOCIMIENTO ACUMULADO:
 {knowledge}
 
-**Fuentes consultadas ({num_sources}):**
+FUENTES CONSULTADAS ({num_sources}):
 {source_list}
 
-Escribe el informe EN MARKDOWN con:
-1. Un resumen ejecutivo
-2. Análisis detallado con subsecciones
-3. Hallazgos clave
-4. Conclusiones
-5. Referencias (lista las URLs más relevantes)
+ESTRUCTURA OBLIGATORIA DEL INFORME EN MARKDOWN:
 
-Sé exhaustivo pero claro. Usa emojis ocasionalmente para mejor legibilidad."""
+## Resumen Ejecutivo
+(2-3 párrafos: de qué trata, qué se encontró, conclusión principal)
 
-CHAT_SYSTEM_PROMPT = """Eres un asistente inteligente y útil. Responde de manera clara, precisa y en el idioma del usuario. Cuando no sepas algo, dilo con honestidad."""
+## Análisis Detallado
+(subsecciones temáticas con los hallazgos más importantes, datos concretos, ejemplos)
 
-SEARCH_SUMMARY_PROMPT = """Resume los siguientes resultados de búsqueda web sobre "{query}" de manera concisa y útil:
+## Hallazgos Clave
+(lista de 4-7 bullets con los puntos más importantes y accionables)
 
+## Conclusiones
+(qué significa todo esto en el contexto del objetivo original. Sin divagar)
+
+## Fuentes
+(lista de URLs relevantes en formato markdown)
+
+NORMAS DE REDACCIÓN:
+- Usa el idioma del objetivo original
+- Sé directo y específico. Evita frases de relleno
+- No repitas información entre secciones
+- No corrijas ni reinterpretes el objetivo original
+- Usa negritas para destacar datos importantes"""
+
+CHAT_SYSTEM_PROMPT = """\
+Eres un asistente directo, claro y preciso. Responde siempre en el idioma del usuario.
+Si no sabes algo, dilo sin rodeos. No rellenes con frases vacías.
+Mantén las respuestas enfocadas en lo que el usuario preguntó."""
+
+SEARCH_SUMMARY_PROMPT = """\
+ROL: Extractor de información relevante.
+
+CONSULTA: {query}
+
+RESULTADOS DE BÚSQUEDA:
 {content}
 
-Incluye los hallazgos más importantes y las URLs relevantes."""
+INSTRUCCIONES:
+- Extrae únicamente la información que responde directamente a la consulta
+- Presenta los hallazgos en orden de relevancia
+- Incluye las URLs de las fuentes más útiles
+- Si los resultados no responden la consulta, dilo en una línea y sugiere cómo reformularla
+- Sé conciso: máximo 300 palabras"""
 
 
 class ResearchAgent:
